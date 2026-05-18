@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>预约登记系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 登录页面 -->
+        <div id="loginPage" class="page">
+            <div class="login-box">
+                <h1>预约登记系统</h1>
+                <div class="form-group">
+                    <label for="username">请输入用户名：</label>
+                    <input type="text" id="username" placeholder="输入您的用户名" required>
+                </div>
+                <div class="form-group">
+                    <label>请选择身份：</label>
+                    <div class="role-selector">
+                        <label class="role-option">
+                            <input type="radio" name="role" value="civilian" checked>
+                            <span class="role-icon">👤</span>
+                            <span class="role-label">平民</span>
+                        </label>
+                        <label class="role-option">
+                            <input type="radio" name="role" value="friend">
+                            <span class="role-icon">👑</span>
+                            <span class="role-label">小友</span>
+                        </label>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="login()">登录</button>
+            </div>
+        </div>
+
+        <!-- 预约页面 -->
+        <div id="appointmentPage" class="page" style="display: none;">
+            <div class="header">
+                <h2>欢迎，<span id="currentUser"></span> <span id="userRole"></span></h2>
+                <button class="btn btn-secondary" onclick="logout()">退出登录</button>
+            </div>
+
+            <!-- 平民预约区域 -->
+            <div id="civilianSection">
+                <div class="appointment-section">
+                    <h3>新建预约</h3>
+                    <div class="form-group">
+                        <label for="appointmentDate">选择日期：</label>
+                        <input type="date" id="appointmentDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="appointmentTime">选择时间：</label>
+                        <select id="appointmentTime" required>
+                            <option value="">请选择时间段</option>
+                            <option value="09:00-10:00">09:00 - 10:00</option>
+                            <option value="10:00-11:00">10:00 - 11:00</option>
+                            <option value="11:00-12:00">11:00 - 12:00</option>
+                            <option value="14:00-15:00">14:00 - 15:00</option>
+                            <option value="15:00-16:00">15:00 - 16:00</option>
+                            <option value="16:00-17:00">16:00 - 17:00</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="appointmentReason">预约原因：</label>
+                        <textarea id="appointmentReason" placeholder="请输入预约原因（可选）" rows="3"></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="createAppointment()">确认预约</button>
+                </div>
+
+                <div class="appointments-list-section">
+                    <h3>预约记录</h3>
+                    <div id="appointmentsList"></div>
+                    <div class="pagination" id="civilianPagination"></div>
+                </div>
+            </div>
+
+            <!-- 小友管理区域 -->
+            <div id="friendSection" style="display: none;">
+                <div class="tab-buttons">
+                    <button class="btn-tab active" data-tab="appointments">预约列表</button>
+                    <button class="btn-tab" data-tab="users">用户列表</button>
+                    <button class="btn-tab" data-tab="logs">访问日志</button>
+                </div>
+
+                <!-- 预约列表标签页 -->
+                <div id="appointmentsTab" class="tab-content">
+                    <div class="appointments-list-section">
+                        <h3>所有预约列表</h3>
+                        <div class="filter-buttons">
+                            <button class="btn-filter active" data-filter="all">全部</button>
+                            <button class="btn-filter" data-filter="pending">待处理</button>
+                            <button class="btn-filter" data-filter="accepted">已接受</button>
+                            <button class="btn-filter" data-filter="ignored">不予理会</button>
+                        </div>
+                        <div id="allAppointmentsList"></div>
+                        <div class="pagination" id="friendPagination"></div>
+                    </div>
+                </div>
+
+                <!-- 用户列表标签页 -->
+                <div id="usersTab" class="tab-content" style="display: none;">
+                    <div class="appointments-list-section">
+                        <h3>所有用户列表</h3>
+                        <div id="usersList"></div>
+                    </div>
+                </div>
+
+                <!-- 访问日志标签页 -->
+                <div id="logsTab" class="tab-content" style="display: none;">
+                    <div class="appointments-list-section">
+                        <h3>访问日志（最近100条）</h3>
+                        <div id="accessLogsList"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

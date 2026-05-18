@@ -1,0 +1,9 @@
+services:
+  - name: appointment-system
+    source: .
+    type: prebuilt
+    buildCommand: npm install
+    startCommand: node server.js
+    env:
+      - key: PORT
+        value: 3000
