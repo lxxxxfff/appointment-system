@@ -1,5 +1,5 @@
 // API 基础地址
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'https://appointment-system-6yrz.onrender.com/api';
 
 // 用户登录功能
 let currentUser = null;
