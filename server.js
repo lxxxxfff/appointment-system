@@ -12,6 +12,11 @@ app.use(express.json());
 // 静态文件服务
 app.use(express.static(__dirname));
 
+// 根路径重定向到主页
+app.get('/', (req, res) => {
+    res.redirect('/appointment.html');
+});
+
 // 记录访问日志的辅助函数
 function logAccess(username, action, details, ipAddress) {
     db.run(
@@ -22,11 +27,19 @@ function logAccess(username, action, details, ipAddress) {
 
 // 用户登录/注册
 app.post('/api/login', (req, res) => {
-    const { username, role } = req.body;
+    const { username, password } = req.body;
     const ipAddress = req.ip || req.connection.remoteAddress;
 
-    if (!username || !role) {
-        return res.status(400).json({ error: '用户名和角色不能为空' });
+    if (!username || !password) {
+        return res.status(400).json({ error: '用户名和密码不能为空' });
+    }
+
+    // 确定角色
+    let role;
+    if (username === '张爽大王') {
+        role = 'king';
+    } else {
+        role = 'civilian';  // 默认平民
     }
 
     // 检查用户是否存在
@@ -36,10 +49,15 @@ app.post('/api/login', (req, res) => {
         }
 
         if (user) {
-            // 用户存在，更新最后登录时间和角色
+            // 用户存在，验证密码
+            if (user.password !== password) {
+                return res.status(401).json({ error: '密码错误' });
+            }
+
+            // 更新最后登录时间
             db.run(
-                'UPDATE users SET last_login = CURRENT_TIMESTAMP, role = ? WHERE username = ?',
-                [role, username],
+                'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE username = ?',
+                [username],
                 (err) => {
                     if (err) {
                         return res.status(500).json({ error: '数据库错误' });
@@ -47,15 +65,15 @@ app.post('/api/login', (req, res) => {
                     logAccess(username, 'LOGIN', '登录系统', ipAddress);
                     res.json({
                         success: true,
-                        user: { username: user.username, role: role }
+                        user: { username: user.username, role: user.role }
                     });
                 }
             );
         } else {
             // 新用户，创建记录
             db.run(
-                'INSERT INTO users (username, role) VALUES (?, ?)',
-                [username, role],
+                'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+                [username, password, role],
                 function(err) {
                     if (err) {
                         if (err.message.includes('UNIQUE')) {
@@ -226,11 +244,11 @@ app.delete('/api/appointments/expired', (req, res) => {
     );
 });
 
-// 获取所有访问日志（仅小友）
+// 获取所有访问日志（仅小友和张爽大王）
 app.get('/api/access-logs', (req, res) => {
     const { username, role } = req.query;
 
-    if (role !== 'friend') {
+    if (role !== 'friend' && role !== 'king') {
         return res.status(403).json({ error: '无权访问' });
     }
 
@@ -246,11 +264,11 @@ app.get('/api/access-logs', (req, res) => {
     );
 });
 
-// 获取所有用户列表（仅小友）
+// 获取所有用户列表（仅小友和张爽大王）
 app.get('/api/users', (req, res) => {
     const { role } = req.query;
 
-    if (role !== 'friend') {
+    if (role !== 'friend' && role !== 'king') {
         return res.status(403).json({ error: '无权访问' });
     }
 
@@ -262,6 +280,116 @@ app.get('/api/users', (req, res) => {
                 return res.status(500).json({ error: '数据库错误' });
             }
             res.json(users);
+        }
+    );
+});
+
+// 修改用户角色（仅张爽大王）
+app.put('/api/users/:username/role', (req, res) => {
+    const { username: targetUsername } = req.params;
+    const { role: newRole, currentUser: requestUser } = req.body;
+
+    // 验证请求者是张爽大王
+    if (!requestUser) {
+        return res.status(403).json({ error: '未授权' });
+    }
+
+    db.get('SELECT * FROM users WHERE username = ?', [requestUser], (err, requester) => {
+        if (err) {
+            return res.status(500).json({ error: '数据库错误' });
+        }
+
+        if (!requester || requester.role !== 'king') {
+            return res.status(403).json({ error: '只有张爽大王可以修改用户角色' });
+        }
+
+        // 检查新角色是否有效
+        if (newRole !== 'civilian' && newRole !== 'friend') {
+            return res.status(400).json({ error: '无效的角色' });
+        }
+
+        // 检查目标用户是否存在
+        db.get('SELECT * FROM users WHERE username = ?', [targetUsername], (err, targetUser) => {
+            if (err) {
+                return res.status(500).json({ error: '数据库错误' });
+            }
+
+            if (!targetUser) {
+                return res.status(404).json({ error: '用户不存在' });
+            }
+
+            // 不能修改张爽大王的角色
+            if (targetUser.role === 'king') {
+                return res.status(403).json({ error: '不能修改张爽大王的角色' });
+            }
+
+            // 不能修改自己的角色
+            if (targetUsername === requestUser) {
+                return res.status(403).json({ error: '不能修改自己的角色' });
+            }
+
+            // 更新角色
+            db.run(
+                'UPDATE users SET role = ? WHERE username = ?',
+                [newRole, targetUsername],
+                function(err) {
+                    if (err) {
+                        return res.status(500).json({ error: '数据库错误' });
+                    }
+                    logAccess(requestUser, 'UPDATE_USER_ROLE', `将 ${targetUsername} 的角色改为 ${newRole}`, req.ip || req.connection.remoteAddress);
+                    res.json({
+                        success: true,
+                        message: `已将 ${targetUsername} 的角色改为 ${newRole === 'civilian' ? '平民' : '小友'}`
+                    });
+                }
+            );
+        });
+    });
+});
+
+// 获取预约留言
+app.get('/api/appointments/:id/comments', (req, res) => {
+    const { id } = req.params;
+
+    db.all(
+        'SELECT * FROM comments WHERE appointment_id = ? ORDER BY created_at ASC',
+        [id],
+        (err, comments) => {
+            if (err) {
+                return res.status(500).json({ error: '数据库错误' });
+            }
+            res.json(comments);
+        }
+    );
+});
+
+// 添加留言
+app.post('/api/appointments/:id/comments', (req, res) => {
+    const { id } = req.params;
+    const { username, content, parent_id } = req.body;
+
+    if (!username || !content || !content.trim()) {
+        return res.status(400).json({ error: '留言内容不能为空' });
+    }
+
+    db.run(
+        'INSERT INTO comments (appointment_id, username, content, parent_id) VALUES (?, ?, ?, ?)',
+        [id, username, content.trim(), parent_id || null],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: '数据库错误' });
+            }
+            res.json({
+                success: true,
+                comment: {
+                    id: this.lastID,
+                    appointment_id: parseInt(id),
+                    username,
+                    content: content.trim(),
+                    parent_id: parent_id || null,
+                    created_at: new Date().toISOString()
+                }
+            });
         }
     );
 });

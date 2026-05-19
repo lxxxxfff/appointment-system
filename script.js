@@ -1,5 +1,5 @@
 // API 基础地址
-const API_BASE = 'https://appointment-system-6yrz.onrender.com/api';
+const API_BASE = 'http://localhost:3000/api';
 
 // 用户登录功能
 let currentUser = null;
@@ -26,32 +26,32 @@ async function cleanExpiredAppointments() {
 // 用户登录
 async function login() {
     const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
     const username = usernameInput.value.trim();
+    const password = passwordInput.value;
 
     if (!username) {
         showToast('请输入用户名', 'error');
         return;
     }
 
-    const roleInputs = document.getElementsByName('role');
-    for (const input of roleInputs) {
-        if (input.checked) {
-            currentRole = input.value;
-            break;
-        }
+    if (!password) {
+        showToast('请输入密码', 'error');
+        return;
     }
 
     try {
         const response = await fetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, role: currentRole })
+            body: JSON.stringify({ username, password })
         });
 
         const data = await response.json();
 
         if (data.success) {
             currentUser = username;
+            currentRole = data.user.role;
             localStorage.setItem('currentUser', currentUser);
             localStorage.setItem('currentRole', currentRole);
 
@@ -68,6 +68,8 @@ async function login() {
             await cleanExpiredAppointments();
             await loadAppointments();
             showToast('登录成功！', 'success');
+            // 清空密码
+            passwordInput.value = '';
         } else {
             showToast(data.error || '登录失败', 'error');
         }
@@ -80,21 +82,41 @@ async function login() {
 // 更新身份显示
 function updateRoleDisplay() {
     const roleSpan = document.getElementById('userRole');
-    roleSpan.textContent = currentRole === 'civilian' ? '（平民）' : '（小友）';
-    roleSpan.className = currentRole === 'civilian' ? 'role-civilian' : 'role-friend';
+    const kingCrown = document.getElementById('kingCrown');
+    if (currentRole === 'civilian') {
+        roleSpan.textContent = '（平民）';
+        roleSpan.className = 'role-civilian';
+        kingCrown.style.display = 'none';
+    } else if (currentRole === 'friend') {
+        roleSpan.textContent = '（小友）';
+        roleSpan.className = 'role-friend';
+        kingCrown.style.display = 'none';
+    } else if (currentRole === 'king') {
+        roleSpan.textContent = '（张爽大王）';
+        roleSpan.className = 'role-king';
+        kingCrown.style.display = 'inline';
+    }
 }
 
 // 根据身份显示不同区域
 function showSectionByRole() {
     const civilianSection = document.getElementById('civilianSection');
     const friendSection = document.getElementById('friendSection');
+    const kingSection = document.getElementById('kingSection');
 
     if (currentRole === 'civilian') {
         civilianSection.style.display = 'block';
         friendSection.style.display = 'none';
+        kingSection.style.display = 'none';
+    } else if (currentRole === 'king') {
+        civilianSection.style.display = 'none';
+        friendSection.style.display = 'none';
+        kingSection.style.display = 'block';
+        loadKingUsers();
     } else {
         civilianSection.style.display = 'none';
         friendSection.style.display = 'block';
+        kingSection.style.display = 'none';
     }
 }
 
@@ -115,7 +137,8 @@ function logout() {
 // 创建预约
 async function createAppointment() {
     const date = document.getElementById('appointmentDate').value;
-    const time = document.getElementById('appointmentTime').value;
+    const timeStart = document.getElementById('appointmentTimeStart').value;
+    const timeEnd = document.getElementById('appointmentTimeEnd').value;
     const reason = document.getElementById('appointmentReason').value.trim();
 
     if (!date) {
@@ -123,10 +146,17 @@ async function createAppointment() {
         return;
     }
 
-    if (!time) {
-        showToast('请选择预约时间', 'error');
+    if (!timeStart || !timeEnd) {
+        showToast('请选择预约时间段', 'error');
         return;
     }
+
+    if (timeStart >= timeEnd) {
+        showToast('结束时间必须大于开始时间', 'error');
+        return;
+    }
+
+    const time = `${timeStart}-${timeEnd}`;
 
     try {
         const response = await fetch(`${API_BASE}/appointments`, {
@@ -139,7 +169,8 @@ async function createAppointment() {
 
         if (data.success) {
             document.getElementById('appointmentDate').value = '';
-            document.getElementById('appointmentTime').value = '';
+            document.getElementById('appointmentTimeStart').value = '';
+            document.getElementById('appointmentTimeEnd').value = '';
             document.getElementById('appointmentReason').value = '';
             await loadAppointments();
             showToast('预约成功！', 'success');
@@ -172,7 +203,7 @@ async function loadAppointments() {
 }
 
 // 平民加载所有预约（带分页）
-function loadCivilianAppointments(appointments) {
+async function loadCivilianAppointments(appointments) {
     const listContainer = document.getElementById('appointmentsList');
     const totalItems = appointments.length;
     const totalPages = Math.ceil(totalItems / pageSize) || 1;
@@ -194,13 +225,26 @@ function loadCivilianAppointments(appointments) {
         return;
     }
 
-    listContainer.innerHTML = pageData.map(apt => `
-        <div class="appointment-card">
+    // 检测冲突
+    const conflicts = detectConflicts(appointments);
+
+    // 加载留言
+    for (const apt of pageData) {
+        apt.comments = await loadComments(apt.id);
+    }
+
+    listContainer.innerHTML = pageData.map(apt => {
+        const isConflict = conflicts.has(apt.id);
+        const conflictClass = isConflict ? 'conflict' : 'no-conflict';
+
+        return `
+        <div class="appointment-card ${conflictClass}" data-appointment-id="${apt.id}">
             <div class="appointment-card-header">
                 <div>
                     <div class="appointment-user">预约人：${apt.username}</div>
                     <div class="appointment-date">${formatDate(apt.date)}</div>
                     <div class="appointment-time">${apt.time}</div>
+                    ${isConflict ? '<div class="conflict-badge">⚠️ 时间冲突</div>' : ''}
                 </div>
                 <div>
                     <span class="status-badge status-${apt.status}">${getStatusText(apt.status)}</span>
@@ -210,14 +254,280 @@ function loadCivilianAppointments(appointments) {
             <div class="appointment-actions">
                 ${apt.username === currentUser ? `<button class="btn btn-danger" onclick="cancelAppointment(${apt.id})">取消预约</button>` : ''}
             </div>
+            ${renderComments(apt)}
         </div>
-    `).join('');
+    `}).join('');
 
     renderPagination('civilianPagination', civilianCurrentPage, totalPages, 'civilian');
 }
 
+// 加载留言
+async function loadComments(appointmentId) {
+    try {
+        const response = await fetch(`${API_BASE}/appointments/${appointmentId}/comments`);
+        return await response.json();
+    } catch (error) {
+        console.error('加载留言错误:', error);
+        return [];
+    }
+}
+
+// 渲染留言
+function renderComments(apt) {
+    const comments = apt.comments || [];
+
+    // 构建层级结构
+    const commentTree = buildCommentTree(comments);
+
+    const commentsHtml = Object.values(commentTree).map(comment => renderCommentItem(comment, apt.id)).join('');
+
+    return `
+        <div class="comments-section" id="comments-${apt.id}">
+            <button class="comment-toggle-btn" onclick="openCommentModal(${apt.id})">
+                💬 查看留言 (${comments.length})
+            </button>
+        </div>
+    `;
+}
+
+// 构建评论树
+function buildCommentTree(comments) {
+    const tree = {};
+    const children = {};
+
+    // 先收集所有评论和子评论关系
+    comments.forEach(comment => {
+        tree[comment.id] = { ...comment, replies: [] };
+        if (comment.parent_id) {
+            if (!children[comment.parent_id]) {
+                children[comment.parent_id] = [];
+            }
+            children[comment.parent_id].push(comment.id);
+        }
+    });
+
+    // 构建层级
+    Object.keys(children).forEach(parentId => {
+        const parent = tree[parentId];
+        if (parent) {
+            parent.replies = children[parentId].map(id => tree[id]);
+        }
+    });
+
+    // 只返回顶级评论
+    const topLevel = {};
+    Object.values(tree).forEach(comment => {
+        if (!comment.parent_id) {
+            topLevel[comment.id] = comment;
+        }
+    });
+
+    return topLevel;
+}
+
+// 渲染单个评论项
+function renderCommentItem(comment, appointmentId) {
+    const repliesHtml = comment.replies && comment.replies.length > 0
+        ? `<div class="comment-reply-list">
+            ${comment.replies.map(reply => renderReplyItem(reply, appointmentId)).join('')}
+           </div>`
+        : '';
+
+    return `
+        <div class="comment-item" id="comment-${comment.id}">
+            <div class="comment-header">
+                <span class="comment-user">${comment.username}</span>
+                <span class="comment-time">${formatDateTime(comment.created_at)}</span>
+            </div>
+            <div class="comment-content">${comment.content}</div>
+            <button class="comment-reply-btn" onclick="setReplyTargetInModal(${comment.id}, '${comment.username}')">回复</button>
+            ${repliesHtml}
+        </div>
+    `;
+}
+
+// 渲染回复项
+function renderReplyItem(reply, appointmentId) {
+    const nestedRepliesHtml = reply.replies && reply.replies.length > 0
+        ? `<div class="comment-reply-list">
+            ${reply.replies.map(r => renderReplyItem(r, appointmentId)).join('')}
+           </div>`
+        : '';
+
+    return `
+        <div class="comment-reply-item" id="comment-${reply.id}">
+            <div class="comment-reply-header">
+                <span class="comment-reply-user">${reply.username}</span>
+                <span class="comment-time">${formatDateTime(reply.created_at)}</span>
+            </div>
+            ${reply.parent_comment_username ? `<div class="comment-reply-to">回复 ${reply.parent_comment_username}</div>` : ''}
+            <div class="comment-reply-content">${reply.content}</div>
+            <button class="comment-reply-btn" onclick="setReplyTargetInModal(${reply.id}, '${reply.username}')">回复</button>
+            ${nestedRepliesHtml}
+        </div>
+    `;
+}
+
+// 在弹窗中设置回复目标
+function setReplyTargetInModal(commentId, username) {
+    setReplyTarget(commentId, username);
+}
+
+// 全局变量存储当前评论状态
+let currentCommentModal = null;
+let currentAppointmentId = null;
+let currentParentCommentId = null;
+
+// 打开留言弹窗
+function openCommentModal(appointmentId, parentCommentId = null) {
+    currentAppointmentId = appointmentId;
+    currentParentCommentId = parentCommentId;
+
+    // 关闭已存在的弹窗
+    if (currentCommentModal) {
+        document.body.removeChild(currentCommentModal);
+    }
+
+    // 创建弹窗
+    const modal = document.createElement('div');
+    modal.className = 'comment-modal';
+    modal.id = 'commentModal';
+
+    modal.innerHTML = `
+        <div class="comment-modal-content">
+            <div class="comment-modal-header">
+                <span class="comment-modal-title">留言</span>
+                <button class="comment-modal-close" onclick="closeCommentModal()">×</button>
+            </div>
+            <div class="comment-modal-body" id="commentModalBody">
+                <div class="comments-list" id="modalCommentsList"></div>
+            </div>
+            <div class="comment-replying-to" id="commentReplyingTo" style="display: none;">
+                <span class="comment-replying-to-text" id="replyingToText"></span>
+                <button class="comment-cancel-reply" onclick="cancelReply()">×</button>
+            </div>
+            <div class="comment-modal-input-area">
+                <textarea id="commentModalInput" placeholder="输入留言内容..." rows="3"></textarea>
+                <button class="btn-send" onclick="sendComment()">发送</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    currentCommentModal = modal;
+
+    // 加载留言
+    loadModalComments();
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeCommentModal();
+        }
+    });
+}
+
+// 加载弹窗中的留言
+async function loadModalComments() {
+    try {
+        const response = await fetch(`${API_BASE}/appointments/${currentAppointmentId}/comments`);
+        const comments = await response.json();
+
+        // 构建评论树
+        const commentTree = buildCommentTree(comments);
+
+        const commentsHtml = Object.values(commentTree).map(comment => renderCommentItem(comment, currentAppointmentId)).join('');
+
+        const listContainer = document.getElementById('modalCommentsList');
+        if (Object.keys(commentTree).length === 0) {
+            listContainer.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">暂无留言</div>';
+        } else {
+            listContainer.innerHTML = commentsHtml;
+        }
+
+        // 更新按钮文字
+        const btn = document.querySelector(`#comments-${currentAppointmentId} .comment-toggle-btn`);
+        if (btn) {
+            btn.textContent = `💬 查看留言 (${comments.length})`;
+        }
+    } catch (error) {
+        console.error('加载留言错误:', error);
+    }
+}
+
+// 关闭留言弹窗
+function closeCommentModal() {
+    if (currentCommentModal) {
+        document.body.removeChild(currentCommentModal);
+        currentCommentModal = null;
+        currentAppointmentId = null;
+        currentParentCommentId = null;
+    }
+}
+
+// 取消回复
+function cancelReply() {
+    currentParentCommentId = null;
+    document.getElementById('commentReplyingTo').style.display = 'none';
+    document.getElementById('commentModalInput').placeholder = '输入留言内容...';
+}
+
+// 设置回复目标
+function setReplyTarget(commentId, username) {
+    currentParentCommentId = commentId;
+    const replySection = document.getElementById('commentReplyingTo');
+    const replyText = document.getElementById('replyingToText');
+    replySection.style.display = 'flex';
+    replyText.textContent = `回复 ${username}`;
+    document.getElementById('commentModalInput').placeholder = `回复 ${username}...`;
+    document.getElementById('commentModalInput').focus();
+}
+
+// 发送留言
+async function sendComment() {
+    const input = document.getElementById('commentModalInput');
+    const content = input.value.trim();
+
+    if (!content) {
+        showToast('请输入留言内容', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/appointments/${currentAppointmentId}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: currentUser,
+                content,
+                parent_id: currentParentCommentId
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            input.value = '';
+            cancelReply();
+            await loadModalComments();
+            await loadAppointments();
+            showToast('留言成功', 'success');
+        } else {
+            showToast(data.error || '留言失败', 'error');
+        }
+    } catch (error) {
+        console.error('添加留言错误:', error);
+        showToast('留言失败', 'error');
+    }
+}
+
+// 添加留言（保留原函数作为兼容）
+async function addComment(appointmentId) {
+    openCommentModal(appointmentId);
+}
+
 // 小友加载所有预约（带分页和筛选）
-function loadAllAppointments(appointments) {
+async function loadAllAppointments(appointments) {
     const listContainer = document.getElementById('allAppointmentsList');
     const totalItems = appointments.length;
     const totalPages = Math.ceil(totalItems / pageSize) || 1;
@@ -239,13 +549,26 @@ function loadAllAppointments(appointments) {
         return;
     }
 
-    listContainer.innerHTML = pageData.map(apt => `
-        <div class="appointment-card">
+    // 检测冲突
+    const conflicts = detectConflicts(appointments);
+
+    // 加载留言
+    for (const apt of pageData) {
+        apt.comments = await loadComments(apt.id);
+    }
+
+    listContainer.innerHTML = pageData.map(apt => {
+        const isConflict = conflicts.has(apt.id);
+        const conflictClass = isConflict ? 'conflict' : 'no-conflict';
+
+        return `
+        <div class="appointment-card ${conflictClass}">
             <div class="appointment-card-header">
                 <div>
                     <div class="appointment-user">预约人：${apt.username}</div>
                     <div class="appointment-date">${formatDate(apt.date)}</div>
                     <div class="appointment-time">${apt.time}</div>
+                    ${isConflict ? '<div class="conflict-badge">⚠️ 时间冲突</div>' : ''}
                 </div>
                 <div>
                     <span class="status-badge status-${apt.status}">${getStatusText(apt.status)}</span>
@@ -264,8 +587,9 @@ function loadAllAppointments(appointments) {
                     <button class="btn btn-success" onclick="acceptAppointment(${apt.id})">接受预约</button>
                 ` : ''}
             </div>
+            ${renderComments(apt)}
         </div>
-    `).join('');
+    `}).join('');
 
     renderPagination('friendPagination', friendCurrentPage, totalPages, 'friend');
 }
@@ -456,6 +780,12 @@ window.addEventListener('load', async () => {
 // 支持回车键登录
 document.getElementById('username').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
+        document.getElementById('password').focus();
+    }
+});
+
+document.getElementById('password').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
         login();
     }
 });
@@ -586,3 +916,202 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// === 张爽大王专用功能 ===
+
+// 检测两个时间段是否重叠
+function isTimeOverlap(start1, end1, start2, end2) {
+    const s1 = timeToMinutes(start1);
+    const e1 = timeToMinutes(end1);
+    const s2 = timeToMinutes(start2);
+    const e2 = timeToMinutes(end2);
+    return Math.max(s1, s2) < Math.min(e1, e2);
+}
+
+// 将时间字符串转换为分钟数
+function timeToMinutes(timeStr) {
+    const parts = timeStr.split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+}
+
+// 提取时间段的开始和结束时间
+function parseTimeRange(timeRange) {
+    const parts = timeRange.split('-');
+    if (parts.length === 2) {
+        return { start: parts[0].trim(), end: parts[1].trim() };
+    }
+    return null;
+}
+
+// 检测预约列表中的时间冲突（小友和张家大王使用）
+function detectConflicts(appointments) {
+    const conflicts = new Set();
+    const dateGroups = {};
+
+    // 按日期分组
+    appointments.forEach(apt => {
+        if (!dateGroups[apt.date]) {
+            dateGroups[apt.date] = [];
+        }
+        dateGroups[apt.date].push(apt);
+    });
+
+    // 检查每天的冲突
+    for (const date in dateGroups) {
+        const dayAppointments = dateGroups[date];
+        for (let i = 0; i < dayAppointments.length; i++) {
+            for (let j = i + 1; j < dayAppointments.length; j++) {
+                const apt1 = dayAppointments[i];
+                const apt2 = dayAppointments[j];
+                const range1 = parseTimeRange(apt1.time);
+                const range2 = parseTimeRange(apt2.time);
+
+                if (range1 && range2) {
+                    if (isTimeOverlap(range1.start, range1.end, range2.start, range2.end)) {
+                        conflicts.add(apt1.id);
+                        conflicts.add(apt2.id);
+                    }
+                }
+            }
+        }
+    }
+
+    return conflicts;
+}
+
+// 加载用户管理列表
+async function loadKingUsers() {
+    try {
+        const response = await fetch(`${API_BASE}/users?role=${currentRole}`);
+        const users = await response.json();
+
+        const listContainer = document.getElementById('kingUsersList');
+
+        if (users.length === 0) {
+            listContainer.innerHTML = '<div class="no-appointments">暂无用户</div>';
+            return;
+        }
+
+        listContainer.innerHTML = users.map(user => `
+            <div class="user-card">
+                <div class="user-info">
+                    <span class="user-name">${user.username}</span>
+                    <span class="user-role ${user.role}">${getRoleText(user.role)}</span>
+                </div>
+                <div class="user-meta">
+                    注册: ${formatDateTime(user.created_at)} | 最后登录: ${formatDateTime(user.last_login)}
+                </div>
+                ${user.role !== 'king' && user.username !== currentUser ? `
+                    <div class="user-actions">
+                        ${user.role === 'civilian' ? `
+                            <button class="btn btn-success" onclick="changeUserRole('${user.username}', 'friend')">设为小友</button>
+                        ` : ''}
+                        ${user.role === 'friend' ? `
+                            <button class="btn btn-primary" onclick="changeUserRole('${user.username}', 'civilian')">设为平民</button>
+                        ` : ''}
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('加载用户列表错误:', error);
+        showToast('加载用户列表失败', 'error');
+    }
+}
+
+// 修改用户角色
+async function changeUserRole(username, newRole) {
+    const roleText = newRole === 'civilian' ? '平民' : '小友';
+    if (!confirm(`确定要将 ${username} 的角色改为 ${roleText} 吗？`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/users/${username}/role`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole, currentUser: currentUser })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            await loadKingUsers();
+            showToast(data.message, 'success');
+        } else {
+            showToast(data.error || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('修改角色错误:', error);
+        showToast('操作失败', 'error');
+    }
+}
+
+// 获取角色文本
+function getRoleText(role) {
+    const roleMap = {
+        'civilian': '平民',
+        'friend': '小友',
+        'king': '张爽大王'
+    };
+    return roleMap[role] || role;
+}
+
+// 加载张爽大王的访问日志
+async function loadKingAccessLogs() {
+    try {
+        const response = await fetch(`${API_BASE}/access-logs?username=${currentUser}&role=${currentRole}`);
+        const logs = await response.json();
+
+        const listContainer = document.getElementById('kingAccessLogsList');
+
+        if (logs.length === 0) {
+            listContainer.innerHTML = '<div class="no-appointments">暂无访问日志</div>';
+            return;
+        }
+
+        listContainer.innerHTML = logs.map(log => `
+            <div class="log-entry">
+                <div class="log-entry-header">
+                    <span class="log-username">${log.username}</span>
+                    <span class="log-time">${formatDateTime(log.created_at)}</span>
+                </div>
+                <div class="log-action">${getActionText(log.action)}</div>
+                ${log.details ? `<div class="log-details">${log.details}</div>` : ''}
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('加载访问日志错误:', error);
+    }
+}
+
+// 覆盖原有的 switchTab 函数以支持张爽大王
+const originalSwitchTab = switchTab;
+switchTab = function(tabName) {
+    // 更新按钮状态
+    document.querySelectorAll('.btn-tab').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.tab === tabName) {
+            btn.classList.add('active');
+        }
+    });
+
+    // 隐藏所有标签页内容
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.style.display = 'none';
+    });
+
+    // 显示选中的标签页
+    document.getElementById(`${tabName}Tab`).style.display = 'block';
+
+    // 根据角色加载数据
+    if (tabName === 'appointments' && currentRole === 'friend') {
+        loadAppointments();
+    } else if (tabName === 'logs' && currentRole === 'friend') {
+        loadAccessLogs();
+    } else if (tabName === 'king-users') {
+        loadKingUsers();
+    } else if (tabName === 'king-logs') {
+        loadKingAccessLogs();
+    }
+};
