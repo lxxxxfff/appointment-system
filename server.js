@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// 静态文件服务
+app.use(express.static(__dirname));
+
 // 记录访问日志的辅助函数
 function logAccess(username, action, details, ipAddress) {
     db.run(
